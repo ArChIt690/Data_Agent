@@ -9,3 +9,13 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# Rust port of feed_db.py - DISABLED, kept local only.
+# The Python loader feed_db.py is the one in use.
+# Re-enable with: mv Cargo.toml.disabled Cargo.toml
+/target
+/feed_db.rs
+/Cargo.toml
+/Cargo.toml.disabled
+/Cargo.lock
+/rust-toolchain.toml
