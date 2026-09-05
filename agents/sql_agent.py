@@ -17,4 +17,4 @@ def curated_prompt(state : AgentSchema) ->AgentSchema:
         return logger.error(f"Error occured when taking user input and changing to curated prompt due to: {e}")
 
 def context(state : AgentSchema) -> AgentSchema:
-    ssd
+    
