@@ -1,8 +1,9 @@
 import os
 import logging
 from utils.llm_pick import llm_pick
-from model.schema import AgentSchema
-from langchain_core.messages import HumanMessage
+from utils.database import DataUtils
+from model.schema import AgentSchema, JudgeSchema
+from langchain_core.messages import HumanMessage, AIMessage
 
 logger = logging.getLogger("sql_agent")
 
@@ -51,3 +52,76 @@ def context(state : AgentSchema) -> AgentSchema:
     state.context = Prompt
 
     return state 
+
+def sql_from_llm(state : AgentSchema)-> AgentSchema:
+    Prompt = state.context
+
+    llm = llm_pick("low")
+    sql_from_llm = llm.invoke(Prompt).model_dump
+
+    state.sql_from_llm = sql_from_llm
+    
+    return state
+
+def safe_checker(state: AgentSchema)-> AgentSchema:
+    sql_query = state.sql_from_llm
+    llm = llm_pick("high")
+    llm_judge = llm.with_structured_output(JudgeSchema)
+    prompt = f"""
+            You are an SQL Judge for data security. Your task is to determine whether the SQL query is 
+    safe or not. The SQL query should only be used for data retrieval and should not modify the 
+    database in any way. Neither the SQL query nor the prompt should contain any SQL commands that can modify the
+    database, such as INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, CREATE, or any other commands that can change
+    the structure or content of the database. If the SQL query is safe, respond with 'Yes' otherwise respond with 
+    'No'. Additionally, provide comments explaining your decision.
+    Here's the SQL query to evaluate:
+    {sql_query}
+
+            """
+
+    response = llm_judge.invoke(prompt).model_dump()
+    state.safe_checker = response['answer']
+    state.comments = response['comments']
+
+    return state
+
+def cancel_sql(state : AgentSchema)-> AgentSchema:
+    comments = state.comments 
+    state.final_ans = f"The generated SQL query was deemed unsafe to execute. The reason provided by the judge is: {comments}. Therefore, the SQL query will not be executed"
+    state.messages = state.messages + [AIMessage(content={state.final_ans})]
+
+def final_sql_out( state: AgentSchema)-> AgentSchema:
+    sql_query = state.sql_from_llm
+
+    obj = DataUtils({
+    "dbname" : os.getenv("dbname"),
+    "host" : os.getenv("host"),
+    "user" : os.getenv("user"),
+    "password" : os.getenv("password"),
+    "port" : os.getenv("port"),
+    }) 
+
+    execution_result = obj.execute_sql(sql_query)
+    state.final_sql_out = execution_result
+
+    return state
+
+def represent_final_ans( state : AgentSchema)-> AgentSchema:
+    sql_output = state.final_sql_out
+    final_ans = state.final_ans
+
+    prompt = f"""You are an SQL analyst agent. Your task is to provide a final answer to the user based on the
+    execution result of the SQL query and the user's original question. The final answer should be
+    concise, clear, and directly address the user's query. Avoid including any SQL code or technical
+    details in the final answer. The final answer should be in a user-friendly format that is easy to
+    understand. If the execution result is empty or does not provide a clear answer to the user's question, explain this in the final answer. \n
+    Here is the execution result: {sql_output} \n
+    Here is the user's original question: {final_ans}"""
+
+    llm = llm_pick("low")
+
+    response = llm.invoke(prompt).content
+    response = state.final_ans 
+    state.messages = state.messages + [AIMessage(content=f"{response}")]
+
+    return state

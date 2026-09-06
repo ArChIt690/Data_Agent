@@ -68,6 +68,7 @@ class DataUtils:
             cursor.execute(query)
             result = cursor.fetchall()
             connect.commit()
+            return str(result)
         except Exception as e:
             print(f"Error occured when executing query : {e}")
 
