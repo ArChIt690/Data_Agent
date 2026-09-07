@@ -1,7 +1,7 @@
 import os
 import logging
 from typing import Literal
-from utils.llm_pick import llm_pick
+from utils import llm_pick
 from utils.database import DataUtils
 from model.schema import AgentSchema, JudgeSchema
 from langchain_core.messages import HumanMessage, AIMessage
