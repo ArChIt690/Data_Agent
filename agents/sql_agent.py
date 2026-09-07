@@ -1,7 +1,8 @@
 import os
+import sys
 import logging
 from typing import Literal
-from utils import llm_pick
+from utils.llm_pick import llm_pick
 from utils.database import DataUtils
 from model.schema import AgentSchema, JudgeSchema
 from langchain_core.messages import HumanMessage, AIMessage
@@ -11,17 +12,24 @@ logger = logging.getLogger("sql_agent")
 
 def curated_prompt(state : AgentSchema) -> AgentSchema:
     #takes the user input and changes to curated prompt
-    try:
-        user_input = state.user_question
-        llm = llm_pick("low")
-        response = llm.invoke(f"curate the following question: {user_input}")
-        
-        # EXTRACT CONTENT
-        state.curated_prompt = response.content
-        return state
-    except Exception as e:
-        logger.error(f"Error occured when taking user input and changing to curated prompt due to: {e}")
-        return state
+    user_input = state.user_question
+
+    for level in ("medium", "low", "high"):
+        try:
+            response = llm_pick(level).invoke(f"curate the following question: {user_input}")
+            state.curated_prompt = response.content
+            logger.info(f"Question curated using the {level!r} model")
+            return state
+        except Exception as e:
+            logger.warning(f"Curating via {level!r} model failed: {type(e).__name__}: {e}")
+
+    #Fall back to the user's raw question. Leaving this empty would let the rest
+    #of the graph build a prompt with no question in it and confidently answer
+    #the wrong thing, which is worse than an obviously degraded answer.
+    logger.error("Curating failed on every provider, using the raw question")
+    state.curated_prompt = user_input
+
+    return state
 
 #add context from sql
 def context(state : AgentSchema) -> AgentSchema:
@@ -36,7 +44,7 @@ def context(state : AgentSchema) -> AgentSchema:
     }
 
     obj = DataUtils(conn_details)
-    schema_info = obj.schema_details(obj)
+    schema_info = obj.schema_details("public")
     
     Prompt = f"""
             You are an SQL analyst agent. Your task is to convert the user's natural language 
@@ -62,9 +70,26 @@ def context(state : AgentSchema) -> AgentSchema:
 def sql_from_llm(state : AgentSchema)-> AgentSchema:
     Prompt = state.context
 
-    llm = llm_pick("low")
-    sql_query = llm.invoke(Prompt).content
-    
+    #Try the preferred model first, then the others. Each provider has its own
+    #way of being unavailable (Mistral 429s on a capped key, Gemini has a
+    #20/day free quota), and losing one should not end the run.
+    sql_query = None
+
+    for level in ("medium", "low", "high"):
+        try:
+            sql_query = llm_pick(level).invoke(Prompt).content
+            logger.info(f"SQL generated using the {level!r} model")
+            break
+        except Exception as e:
+            logger.warning(f"SQL generation via {level!r} model failed: {type(e).__name__}: {e}")
+
+    if sql_query is None:
+        #Leave the query empty. safe_checker will refuse it and the graph ends
+        #through cancel_sql rather than crashing here.
+        logger.error("SQL generation failed on every provider")
+        state.sql_from_llm = ""
+        return state
+
     # STRIP MARKDOWN (LLMs often wrap SQL in ```sql ... ``` which crashes the DB)
     sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
 
@@ -74,8 +99,6 @@ def sql_from_llm(state : AgentSchema)-> AgentSchema:
 #guardrail to check if it is safe or not
 def safe_checker(state: AgentSchema)-> AgentSchema:
     sql_query = state.sql_from_llm
-    llm = llm_pick("high")
-    llm_judge = llm.with_structured_output(JudgeSchema)
     prompt = f"""
             You are an SQL Judge for data security. Your task is to determine whether the SQL query is 
     safe or not. The SQL query should only be used for data retrieval and should not modify the 
@@ -85,11 +108,44 @@ def safe_checker(state: AgentSchema)-> AgentSchema:
     'No'. Additionally, provide comments explaining your decision.
     Here's the SQL query to evaluate:
     {sql_query}
+
+    Respond ONLY with a JSON object, no prose, of exactly this shape:
+    {{"answer": "Yes", "comments": "short reason for the decision"}}
             """
 
-    response = llm_judge.invoke(prompt).model_dump()
-    state.safe_checker = response['answer']
-    state.comments = response['comments']
+    #Fail closed. If every model is exhausted or down we must NOT let the query
+    #through unjudged, and we must not crash the graph either - so record a "No"
+    #and let safety_router send this to cancel_sql.
+    #Try each provider in turn. Deliberately NOT with_fallbacks(): when every
+    #link fails that re-raises only the FIRST error, which hides why the
+    #fallback failed and makes the Gemini quota look like the sole cause.
+    response = None
+    failures = []
+
+    #Gemini handles tool calling fine. Groq's gpt-oss-120b often answers in prose
+    #instead of calling the tool (400 tool_use_failed), so ask it for JSON
+    #instead - measured 6/6 with json_mode versus 4/6 with tool calling.
+    for level, kwargs in (("high", {}), ("low", {"method": "json_mode"})):
+        try:
+            judge = llm_pick(level).with_structured_output(JudgeSchema, **kwargs)
+            response = judge.invoke(prompt).model_dump()
+            logger.info(f"Safety judge answered using the {level!r} model")
+            break
+        except Exception as e:
+            failures.append(f"{level}={type(e).__name__}")
+            logger.warning(f"Safety judge via {level!r} model failed: {type(e).__name__}: {e}")
+
+    #Fail closed. If no provider could judge the query we must not let it run
+    #unjudged, and must not crash the graph either - record "No" so that
+    #safety_router sends this to cancel_sql.
+    if response is None:
+        logger.error("Guardrail unavailable on every provider, refusing to execute the query")
+        state.safe_checker = "No"
+        state.comments = f"The safety guardrail could not be reached ({', '.join(failures)}), so the query was not judged and will not be run."
+    else:
+        state.safe_checker = response['answer']
+        state.comments = response['comments']
+
     return state
 
 #cancel the sql node
@@ -103,9 +159,6 @@ def cancel_sql(state : AgentSchema)-> AgentSchema:
 def final_sql_out( state: AgentSchema)-> AgentSchema:
     sql_query = state.sql_from_llm
     
-    # ESCAPE PERCENTAGES for psycopg2 string formatting
-    safe_query = sql_query.replace("%", "%%")
-
     obj = DataUtils({
         "dbname" : os.getenv("dbname"),
         "host" : os.getenv("host"),
@@ -114,7 +167,7 @@ def final_sql_out( state: AgentSchema)-> AgentSchema:
         "port" : os.getenv("port"),
     }) 
 
-    execution_result = obj.execute_sql(safe_query)
+    execution_result = obj.execute_sql(sql_query)
     
     # PROTECT PYDANTIC: Always cast result to string, handle None (failed queries)
     if execution_result is None:
@@ -140,12 +193,16 @@ def represent_final_ans( state : AgentSchema)-> AgentSchema:
     Here is the execution result: {sql_output} \n
     Here is the user's original question: {original_question}"""
 
-    llm = llm_pick("high")
+    #The SQL already ran successfully by this point, so a phrasing failure must
+    #not throw those rows away - hand back the raw result instead of crashing.
+    try:
+        llm = llm_pick("low").with_fallbacks([llm_pick("high")])
+        response = llm.invoke(prompt).content
+    except Exception as e:
+        logger.error(f"Could not phrase the final answer, returning raw rows: {e}")
+        response = f"Could not generate a written summary ({type(e).__name__}). Raw query result: {sql_output}"
 
-    response = llm.invoke(prompt).content
-    
-    # ASSIGN PROPERLY
-    state.final_ans = response 
+    state.final_ans = response
     state.messages = state.messages + [AIMessage(content=response)]
 
     return state
@@ -195,7 +252,12 @@ sql_agent_graph.add_edge("cancel_sql", END)
 sql_analyst = sql_agent_graph.compile()
 
 if __name__ == "__main__":
-    
+
+    #Windows consoles default to cp1252, which cannot encode characters these
+    #models routinely emit (narrow no-break space, em dashes). Without this the
+    #run dies on print() after the graph has already succeeded.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     # Optional image saving
     try:
         from IPython.display import display, Image

@@ -23,7 +23,7 @@ class DataUtils:
         schema_info_context = f"Data Schema: {schema_name}\n"
 
         try:
-            cursor.execute("SELECT table_name from information_schema.tables where table_schema = %s;" , (schema_name))
+            cursor.execute("SELECT table_name from information_schema.tables where table_schema = %s;" , (schema_name,))
             tables_list = cursor.fetchall()
 
             #Adding Table list
@@ -32,7 +32,7 @@ class DataUtils:
                 schema_info_context = f"{schema_info_context}\n {table_name}\n"
 
                 #Adding Column list
-                cursor.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = %s;", (table_name))
+                cursor.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = %s;", (table_name,))
                 column_list = cursor.fetchall()
 
                 for column in column_list:
@@ -78,15 +78,24 @@ class DataUtils:
             if connect:
                 connect.close()
 
-obj = DataUtils({
-    "dbname" : os.getenv("dbname"),
-    "host" : os.getenv("host"),
-    "user" : os.getenv("user"),
-    "password" : os.getenv("password"),
-    "port" : os.getenv("port"),
-}) 
 
-result = obj.schema_details("public")
+#only run this when the file is executed directly.
+#without this guard it fires on every `import utils.database`, which opened a
+#connection and rewrote test_schema_text before the agent had done anything.
+if __name__ == "__main__":
+    from dotenv import load_dotenv
 
-with open("test_schema_text" , "w") as f:
-    f.write(result)
+    load_dotenv(override=True)
+
+    obj = DataUtils({
+        "dbname" : os.getenv("dbname"),
+        "host" : os.getenv("host"),
+        "user" : os.getenv("user"),
+        "password" : os.getenv("password"),
+        "port" : os.getenv("port"),
+    })
+
+    result = obj.schema_details("public")
+
+    with open("test_schema_text" , "w") as f:
+        f.write(result)
