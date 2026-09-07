@@ -31,7 +31,14 @@ def llm_pick(level: str):
                 api_key=os.getenv("MISTRAL_API_KEY"),
                 temperature=0.0
             )
-        elif level.lower() == "OpenAI":
+        elif level.lower() == "openrouter":
+            llm = ChatOpenAI(
+                model="nvidia/nemotron-3.5-lightning:free",
+                api_key=os.getenv("OPENROUTER_API_KEY"),
+                base_url="https://openrouter.ai/api/v1",
+                temperature=0.0,
+            )
+        elif level.lower() == "openai":
             llm = ChatOpenAI(
                 model="gpt-4o",
                 api_key=os.getenv("OPENAI_API_KEY"),
@@ -41,7 +48,7 @@ def llm_pick(level: str):
             )
         else:
             logger.error("Wrong level chosen")
-            raise ValueError(f"Unknown level: {level!r}. Use 'low', 'medium' or 'high'.")
+            raise ValueError(f"Unknown level: {level!r}. Use 'low', 'medium', 'high', 'openai' or 'openrouter'.")
 
         logger.info("LLM chosen succesfully from llm_pick.py")
         return llm
