@@ -26,7 +26,11 @@ def transform_load( input_file_path: str , output_file_path : str, output_format
 
     etl_tools = EtlTools()
     top_3_rows = etl_tools.transform_load(input_file_path)
-    llm = llm_pick("openrouter")
+
+    #groq like the rest of the etl path. the openrouter free tier is capped per
+    #day, and running out here means the extract succeeds and the transform 429s
+    #halfway through the job.
+    llm = llm_pick("low")
 
     prompt = f"""
              You are a Python Data Analyst who uses Pandas to analyze data. 

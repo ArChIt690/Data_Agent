@@ -107,12 +107,16 @@ data_agent_graph.add_conditional_edges("router_node" , agent_decider , {
 
 data_Agent = data_agent_graph.compile()
 
-from IPython.display import display, Image
-img = Image(data_Agent.get_graph().draw_mermaid_png())
-with open("data_agent_graph.png", "wb") as f:
-    f.write(img.data)
-
 if __name__ == "__main__":
+
+    #draw_mermaid_png() posts the graph to mermaid.ink, so this is an 11s
+    #network call. left at module level it ran on every `python main.py` and
+    #took the whole program down whenever that service was slow or rate limited.
+    #etl_agent and sql_agent already keep it behind __main__ - match them.
+    from IPython.display import display, Image
+    img = Image(data_Agent.get_graph().draw_mermaid_png())
+    with open("data_agent_graph.png", "wb") as f:
+        f.write(img.data)
 
     response = data_Agent.invoke(
         {"messages":[HumanMessage(content="I want to extract the data from the API endpoint 'https://pokeapi.co/api/v2/pokemon' and save it to data/extract folder in the csv folder")],
