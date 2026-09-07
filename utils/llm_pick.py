@@ -4,6 +4,7 @@ import logging
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_mistralai import ChatMistralAI
+from langchain_openai import ChatOpenAI 
 
 load_dotenv(override=True)
 logger = logging.getLogger("llm-pick")
@@ -29,6 +30,14 @@ def llm_pick(level: str):
                 model_name="mistral-small-latest",
                 api_key=os.getenv("MISTRAL_API_KEY"),
                 temperature=0.0
+            )
+        elif level.lower() == "OpenAI":
+            llm = ChatOpenAI(
+                model="gpt-4o",
+                api_key=os.getenv("OPENAI_API_KEY"),
+                model_kwargs={
+                    "reasoning_effort" : "none",
+                }
             )
         else:
             logger.error("Wrong level chosen")

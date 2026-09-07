@@ -17,3 +17,6 @@ class JudgeSchema(BaseModel):
     answer : str = Field (description="gives the ans if it is safe or not")
     comments : str = Field(description="comments given by guardrail")
 
+class EtlSchema(BaseModel):
+    messages : Annotated[list, add] = Field(description="Add messages processed by ETL agent")
+    
