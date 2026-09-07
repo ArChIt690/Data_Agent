@@ -266,28 +266,30 @@ if __name__ == "__main__":
             f.write(img.data)
     except Exception as e:
         print("Graph image could not be saved:", e)
+        
+    #only runs when the file is executed directly and only this file
+    if __name__ == "__main__":
+        #keys match the AgentSchema field names
+        input_schema = {
+            "messages": [],
+            "user_question": "What are the different types of Payment Methods we have in our database",
+            "curated_prompt": "",
+            "context": "",
+            "sql_from_llm": "",
+            "safe_checker": "No",
+            "comments": "",
+            "final_sql_out": "",
+            "final_ans": ""
+        }
 
-    #keys match the AgentSchema field names
-    input_schema = {
-        "messages": [],
-        "user_question": "What are the different types of Payment Methods we have in our database",
-        "curated_prompt": "",
-        "context": "",
-        "sql_from_llm": "",
-        "safe_checker": "No",
-        "comments": "",
-        "final_sql_out": "",
-        "final_ans": ""
-    }
+        # Execute the Graph
+        sql_analyst_response = sql_analyst.invoke(input_schema)
+        
+        print("\n========= FINAL LLM ANSWER =========")
+        print(sql_analyst_response['final_ans'])
 
-    # Execute the Graph
-    sql_analyst_response = sql_analyst.invoke(input_schema)
-    
-    print("\n========= FINAL LLM ANSWER =========")
-    print(sql_analyst_response['final_ans'])
+        print("\n========= GENERATED SQL =========")
+        print(sql_analyst_response['sql_from_llm'])
 
-    print("\n========= GENERATED SQL =========")
-    print(sql_analyst_response['sql_from_llm'])
-
-    print("\n========= SQL EXECUTION RESULT =========")
-    print(sql_analyst_response['final_sql_out'])
+        print("\n========= SQL EXECUTION RESULT =========")
+        print(sql_analyst_response['final_sql_out'])
