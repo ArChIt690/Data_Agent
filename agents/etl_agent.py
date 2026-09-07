@@ -54,7 +54,10 @@ def transform_load( input_file_path: str , output_file_path : str, output_format
     return f"Data Transformed and loaded into : f{output_file_path} as {output_format} format.\n\n Pandas code executed : {pandas_code} , result : {results}"
 
 tools = [extract_load_tool , transform_load]
-llm = llm_pick("openrouter")
+
+#same reason as the router: the free openrouter model is slow (20-90s a call)
+#and often returns nothing usable. groq answers in about a second.
+llm = llm_pick("low")
 llm_bind = llm.bind_tools(tools)
 
 def llm_node (state : EtlSchema):
@@ -87,8 +90,22 @@ def tool_node(state : EtlSchema):
     tool_calls = state.messages[-1].tool_calls
 
     for tool_call in tool_calls:
-        tool = tool_by_name[tool_call['name']]
-        observation = tool.invoke(tool_call['args'])
+        #models invent tool names and wrong arguments. crashing the graph loses
+        #the whole run, so hand the mistake back as a ToolMessage and let the
+        #next llm_node turn correct itself.
+        tool = tool_by_name.get(tool_call['name'])
+
+        if tool is None:
+            observation = (
+                f"there is no tool called {tool_call['name']}. "
+                f"available tools: {', '.join(tool_by_name)}"
+            )
+        else:
+            try:
+                observation = tool.invoke(tool_call['args'])
+            except Exception as e:
+                observation = f"tool {tool_call['name']} failed: {type(e).__name__}: {e}"
+
         tool_results.append(ToolMessage(content=observation, tool_call_id = tool_call['id']))
 
     state.messages = tool_results

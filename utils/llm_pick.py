@@ -9,6 +9,12 @@ from langchain_openai import ChatOpenAI
 load_dotenv(override=True)
 logger = logging.getLogger("llm-pick")
 
+#seconds to wait on one request before giving up. the openai client defaults to
+#600s and retries twice, so a free tier model that stalls hangs the agent for
+#half an hour with nothing printed. fail fast and let the caller see the error.
+REQUEST_TIMEOUT = 90
+MAX_RETRIES = 1
+
 #this function is used to choose llm according to the difficuly
 def llm_pick(level: str):
     try:
@@ -17,6 +23,8 @@ def llm_pick(level: str):
                 model="openai/gpt-oss-120b",
                 api_key=os.getenv("GROQ_API_KEY"),
                 temperature=0.0,
+                request_timeout=REQUEST_TIMEOUT,
+                max_retries=MAX_RETRIES,
             )
 
         elif level.lower() == "high":
@@ -24,12 +32,16 @@ def llm_pick(level: str):
                 model="gemini-3.8-flash",
                 api_key=os.getenv("GEMINI_API_KEY"),
                 temperature=0.0,
+                timeout=REQUEST_TIMEOUT,
+                max_retries=MAX_RETRIES,
             )
         elif level.lower() =="medium":
             llm =  ChatMistralAI(
                 model_name="mistral-small-latest",
                 api_key=os.getenv("MISTRAL_API_KEY"),
-                temperature=0.0
+                temperature=0.0,
+                timeout=REQUEST_TIMEOUT,
+                max_retries=MAX_RETRIES,
             )
         elif level.lower() == "openrouter":
             llm = ChatOpenAI(
@@ -37,6 +49,8 @@ def llm_pick(level: str):
                 api_key=os.getenv("OPENROUTER_API_KEY"),
                 base_url="https://openrouter.ai/api/v1",
                 temperature=0.0,
+                request_timeout=REQUEST_TIMEOUT,
+                max_retries=MAX_RETRIES,
             )
         elif level.lower() == "openai":
             llm = ChatOpenAI(
@@ -44,7 +58,9 @@ def llm_pick(level: str):
                 api_key=os.getenv("OPENAI_API_KEY"),
                 model_kwargs={
                     "reasoning_effort" : "none",
-                }
+                },
+                request_timeout=REQUEST_TIMEOUT,
+                max_retries=MAX_RETRIES,
             )
         else:
             logger.error("Wrong level chosen")

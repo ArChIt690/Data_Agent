@@ -9,7 +9,11 @@ from langchain_openai import ChatOpenAI
 from agents.etl_agent import etl_analyst
 from agents.sql_agent import sql_analyst
 
-llm = llm_pick("openrouter")
+#the free openrouter model is a reasoning model: it spends its whole completion
+#budget on reasoning tokens and comes back with finish_reason "error" and no
+#parsed object, which blows up structured output. groq answers this in under a
+#second, and routing is the one call that has to be reliable.
+llm = llm_pick("low")
 llm_router = llm.with_structured_output(RouterSchema)
 
 def router_node(state: DataAgentSchema):
