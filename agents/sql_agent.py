@@ -14,7 +14,10 @@ def curated_prompt(state : AgentSchema) -> AgentSchema:
     #takes the user input and changes to curated prompt
     user_input = state.user_question
 
-    for level in ("medium", "low", "high"):
+    #groq first. the mistral free key 429s on almost every call, so leading with
+    #it meant every question paid for a round trip and a rate limit before groq
+    #answered anyway. groq comes back in about a second.
+    for level in ("low", "medium", "high"):
         try:
             response = llm_pick(level).invoke(f"curate the following question: {user_input}")
             state.curated_prompt = response.content
@@ -70,12 +73,14 @@ def context(state : AgentSchema) -> AgentSchema:
 def sql_from_llm(state : AgentSchema)-> AgentSchema:
     Prompt = state.context
 
-    #Try the preferred model first, then the others. Each provider has its own
-    #way of being unavailable (Mistral 429s on a capped key, Gemini has a
+    #Try the fastest working model first, then the others. Each provider has its
+    #own way of being unavailable (Mistral 429s on a capped key, Gemini has a
     #20/day free quota), and losing one should not end the run.
     sql_query = None
 
-    for level in ("medium", "low", "high"):
+    #same order as curated_prompt, and for the same reason - mistral is capped
+    #so putting it first only added latency to every question.
+    for level in ("low", "medium", "high"):
         try:
             sql_query = llm_pick(level).invoke(Prompt).content
             logger.info(f"SQL generated using the {level!r} model")
