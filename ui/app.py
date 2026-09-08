@@ -2,6 +2,7 @@ import sys
 import time
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 #streamlit puts the script's own folder on sys.path, not the project root, so
@@ -16,6 +17,10 @@ EXAMPLES = [
     "How many rides do we have, broken down by status?",
     "Extract the data from 'https://pokeapi.co/api/v2/pokemon' into data/extract as csv",
 ]
+
+#where the etl agent writes what it extracts and transforms
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+READABLE_FORMATS = {".csv", ".json", ".parquet"}
 
 st.set_page_config(page_title="Data Agent", page_icon="*", layout="centered")
 
@@ -70,6 +75,40 @@ def run_agent(question):
     return answer, meta
 
 
+def data_files():
+    """every readable data file under data/, most recently written first.
+
+    the etl agent takes its output folder from the user's question, so rather
+    than hardcoding data/extract and data/transform this walks the whole folder.
+    sorting by modified time puts whatever the last run produced at the top,
+    which is the file the user actually wants to look at.
+    """
+    if not DATA_DIR.exists():
+        return []
+
+    files = [f for f in DATA_DIR.rglob("*") if f.suffix.lower() in READABLE_FORMATS]
+
+    return sorted(files, key=lambda f: f.stat().st_mtime, reverse=True)
+
+
+def load_file(file_path):
+    suffix = file_path.suffix.lower()
+
+    if suffix == ".csv":
+        return pd.read_csv(file_path)
+
+    if suffix == ".json":
+        #extract_data writes json with lines=True, so try that first. a file
+        #from anywhere else is more likely to be a plain array, so fall back to
+        #that instead of failing.
+        try:
+            return pd.read_json(file_path, lines=True)
+        except ValueError:
+            return pd.read_json(file_path)
+
+    return pd.read_parquet(file_path)
+
+
 #streamlit reruns this whole file on every click, so the chat has to live in
 #session_state or the page would come back empty after each question.
 if "messages" not in st.session_state:
@@ -92,17 +131,48 @@ with st.sidebar:
     for example in EXAMPLES:
         #a button cannot write straight into the chat, so park the question and
         #let the rerun below pick it up like any typed one.
-        if st.button(example, use_container_width=True):
+        if st.button(example, width="stretch"):
             st.session_state.pending = example
 
     st.divider()
 
-    if st.button("Clear chat", use_container_width=True):
+    if st.button("Clear chat", width="stretch"):
         st.session_state.messages = []
         st.rerun()
 
 st.title("Data Agent")
 st.caption("Ask about the database, or ask for data to be fetched and reshaped.")
+
+#collapsed by default so it stays out of the way until there is a reason to open
+#it. the count in the label is enough to tell the user a new file has appeared.
+files = data_files()
+
+with st.expander(f"Data files ({len(files)})"):
+    if not files:
+        st.caption("Nothing here yet. Ask the ETL agent to fetch or transform something.")
+    else:
+        #show the path relative to data/ so the dropdown reads
+        #"extract/extracted_data.csv" rather than the whole absolute path
+        options = {f.relative_to(DATA_DIR).as_posix(): f for f in files}
+        choice = st.selectbox("File", list(options), label_visibility="collapsed")
+        file_path = options[choice]
+
+        try:
+            df = load_file(file_path)
+        except Exception as e:
+            st.error(f"Could not read that file: {type(e).__name__}: {e}")
+        else:
+            st.caption(f"{len(df):,} rows, {len(df.columns)} columns")
+            st.dataframe(df, width="stretch", height=300)
+
+            #hand back the file exactly as it was written rather than
+            #re-serialising the dataframe, so a json download stays json.
+            st.download_button(
+                f"Download {file_path.name}",
+                data=file_path.read_bytes(),
+                file_name=file_path.name,
+                width="stretch",
+            )
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):

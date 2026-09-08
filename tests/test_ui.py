@@ -31,3 +31,22 @@ def test_clear_chat_empties_the_history():
     clear_button.click().run()
 
     assert app.session_state["messages"] == []
+
+
+def test_the_data_files_panel_lists_what_the_agent_wrote():
+    app = AppTest.from_file(APP).run()
+
+    #the etl agent's output folders are checked in, so there is always
+    #something in the list rather than only after a run
+    assert app.expander[0].label.startswith("Data files")
+    assert "extract/extracted_data.csv" in app.selectbox[0].options
+
+
+def test_picking_a_file_previews_it_and_offers_a_download():
+    app = AppTest.from_file(APP).run()
+
+    app.selectbox[0].set_value("rides.csv").run()
+
+    #the caption reports the shape and the button hands back that same file
+    assert any("rows" in caption.value for caption in app.caption)
+    assert app.download_button[0].label == "Download rides.csv"
