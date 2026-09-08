@@ -127,10 +127,13 @@ def safe_checker(state: AgentSchema)-> AgentSchema:
     response = None
     failures = []
 
-    #Gemini handles tool calling fine. Groq's gpt-oss-120b often answers in prose
-    #instead of calling the tool (400 tool_use_failed), so ask it for JSON
-    #instead - measured 6/6 with json_mode versus 4/6 with tool calling.
-    for level, kwargs in (("high", {}), ("low", {"method": "json_mode"})):
+    #Groq's gpt-oss-120b often answers in prose instead of calling the tool
+    #(400 tool_use_failed), so ask it for JSON instead - measured 6/6 with
+    #json_mode versus 4/6 with tool calling. Gemini handles tool calling fine
+    #and stays as the fallback, but it is second now rather than first: it has
+    #been returning 503 on every call, and waiting for that to fail was adding
+    #most of a minute to every question before groq answered anyway.
+    for level, kwargs in (("low", {"method": "json_mode"}), ("high", {})):
         try:
             judge = llm_pick(level).with_structured_output(JudgeSchema, **kwargs)
             response = judge.invoke(prompt).model_dump()
