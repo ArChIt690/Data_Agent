@@ -1,0 +1,25 @@
+#the api keys and the database password.
+.env
+
+#built on windows against a windows python, useless in a linux container, and
+#the image installs its own venv anyway.
+.venv
+
+.git
+.gitignore
+
+#the **/ matters. docker matches these against the whole path and does not
+#recurse like .gitignore, so plain __pycache__/ only caught the top level one
+#and agents/, utils/, model/, ui/ were all still being copied in.
+**/__pycache__
+**/*.py[oc]
+
+#the rendered langgraph diagrams and the draw.io source.
+*.png
+*.drawio
+*.drawio.bkp
+
+#test cases folder. the dockerfile syncs with --no-dev so pytest is not in the
+#image, which means these could never run in there anyway.
+tests
+.pytest_cache
