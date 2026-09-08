@@ -11,8 +11,13 @@ class DataUtils:
             logging.info("connection successful in log")
 
         except Exception as e:
-            print(f"error occured while connecting to database due to: {e}")
-            self.connect = None
+            #this used to print the reason and set self.connect = None, which
+            #meant every connection problem showed up later as "'NoneType'
+            #object has no attribute 'cursor'" from schema_details, and the real
+            #cause was only in the server log. raise it so the agent's own error
+            #handling shows the user what actually went wrong.
+            logging.error(f"error occured while connecting to database due to: {e}")
+            raise
 
     def schema_details(self, schema_name):
         schema_info_context = ""
