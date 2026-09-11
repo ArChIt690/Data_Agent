@@ -263,3 +263,4 @@ Worth being upfront about:
   timing out on the way to the fallback.
 - **Streamlit session state is per-instance.** Running more than one replica would
   break the chat history, so the deployment is pinned to a single instance.
+  This project is completely made by me
